@@ -34,14 +34,35 @@ module Expr =
     *)
     let update x v s = fun y -> if x = y then v else s y
 
-    (* Expression evaluator
 
-          val eval : state -> t -> int
- 
-       Takes a state and an expression, and returns the value of the expression in 
-       the given state.
+    let bool_to_int b = if b then 1 else 0;;
+	let int_to_bool i = i != 0;;
+
+	let get_operator operator = match operator with
+		| "+" -> ( + )
+		| "-" -> ( - )
+		| "*" -> ( * )
+		| "/" -> ( / )
+		| "%" -> ( mod )
+		| "<" -> fun left_expression right_expression -> bool_to_int ( ( < ) left_expression right_expression )
+		| "<=" -> fun left_expression right_expression -> bool_to_int ( ( <= ) left_expression right_expression )
+		| ">"  -> fun left_expression right_expression -> bool_to_int ( ( > ) left_expression right_expression )
+		| ">=" -> fun left_expression right_expression -> bool_to_int ( ( >= ) left_expression right_expression )
+		| "==" -> fun left_expression right_expression -> bool_to_int ( ( == ) left_expression right_expression )
+		| "!=" -> fun left_expression right_expression -> bool_to_int ( ( != ) left_expression right_expression )
+		| "&&" -> fun left_expression right_expression -> bool_to_int ( ( && ) ( int_to_bool left_expression ) ( int_to_bool right_expression ) )
+		| "!!" -> fun left_expression right_expression -> bool_to_int ( ( || ) ( int_to_bool left_expression ) ( int_to_bool right_expression ) );;
+	
+	(* Expression evaluator
+		val eval : state -> t -> int
+		Takes a state and an expression, and returns the value of the expression in 
+		the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+	let rec eval state expression = match expression with
+		| Const const -> const
+		| Var var -> state var
+		| Binop (operator, left_expression, right_expression) -> get_operator operator (eval state left_expression) (eval state right_expression);;
+	
 
   end
                     
@@ -60,12 +81,18 @@ module Stmt =
     type config = Expr.state * int list * int list 
 
     (* Statement evaluator
-
           val eval : config -> t -> config
-
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
+	let rec eval config statement = 
+	let (state, input, output) = config in
+	match statement with
+		| Read variable_name -> (match input with
+			| head::tail -> (Expr.update variable_name head state, tail, output))
+		| Write expression -> (state, input, output @ [Expr.eval state expression])
+		| Assign (variable_name, expression) -> (Expr.update variable_name (Expr.eval state expression) state, input, output)
+		| Seq (statement1, statement2) -> eval (eval config statement1) statement2;;
+	
                                                          
   end
 
@@ -75,9 +102,7 @@ module Stmt =
 type t = Stmt.t    
 
 (* Top-level evaluator
-
      eval : int list -> t -> int list
-
    Takes a program and its input stream, and returns the output stream
 *)
 let eval i p =
