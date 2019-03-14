@@ -73,14 +73,58 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let makeMov x y = match x, y with
+  | M _, S _ -> [Mov (x, edx); Mov (edx, y)]
+  | S _, S _ -> [Mov (x, edx); Mov (edx, y)]
+  | _, _     -> [Mov (x, y)]
+
+let logicOp op x y = [Mov (y, edx); Binop (op, x, edx)]
+
+let rec makeBinOp op x y = match op with
+  | "+"  -> [Mov (x, eax); Binop ("+", y, eax)], eax
+  | "-"  -> [Mov (x, eax); Binop ("-", y, eax)], eax
+  | "*"  -> [Mov (x, eax); Binop ("*", y, eax)], eax
+  | "/"  -> [Mov (x, eax); Cltd; IDiv y], eax
+  | "%"  -> [Mov (x, eax); Cltd; IDiv y], edx
+  | "==" -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("e", "%al")], eax
+  | "!=" -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("ne", "%al")], eax
+  | "<=" -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("ge", "%al")], eax
+  | "<"  -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("g", "%al")], eax
+  | ">=" -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("le", "%al")], eax
+  | ">"  -> (logicOp "cmp" x y) @ [Mov (L 0, eax); Set ("l", "%al")], eax
+  | "&&"  -> let commandsX, registerX = makeBinOp "!=" x (L 0) in
+             let commandsY, registerY = makeBinOp "!=" y (L 0)
+             in commandsX @ [Mov (registerX, x)] @ commandsY @ [Mov (registerY, y)] @
+                (logicOp "&&" x y) @ [Mov (L 0, eax); Set ("nz", "%al")], eax
+  | "!!"  -> (logicOp "!!" x y) @ [Mov (L 0, eax); Set ("nz", "%al")], eax
+  | _ -> failwith (Printf.sprintf "Unsupported binary operator %s" op)
+
+let rec runInstr env insn = match insn with
+  | READ     -> let e, env = env#allocate
+                in (env, [Call "Lread"] @ makeMov eax e)
+  | WRITE    -> let e, env = env#pop
+                in (env, [Push e; Call "Lwrite"; Pop edx])
+  | CONST c  -> let x, env = env#allocate
+                in (env, makeMov (L c) x)
+  | LD x     -> let e, env = env#allocate
+                in (env, makeMov (M (env#loc x)) e)
+  | ST x     -> let e, env = (env#global x)#pop
+                in (env, makeMov e (M (env#loc x)))
+  | BINOP op -> let x, y, env = env#pop2 in
+                let e, env = env#allocate in
+                let operations, register = makeBinOp op y x
+                in (env, operations @ (makeMov register e))
+
 (* Symbolic stack machine evaluator
-
      compile : env -> prg -> env * instr list
-
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+let rec compile env code = match code with
+  | []          -> (env, [])
+  | insn :: rest -> let env', operations = runInstr env insn in
+                    let env'', operations' = compile env' rest
+                    in (env'', operations @ operations')
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -165,4 +209,3 @@ let build stmt name =
   close_out outf;
   let inc = try Sys.getenv "RC_RUNTIME" with _ -> "../runtime" in
   Sys.command (Printf.sprintf "gcc -m32 -o %s %s/runtime.o %s.s" name inc name)
- 

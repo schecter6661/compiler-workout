@@ -3,8 +3,11 @@
 *)
 open GT
 
+open List
+
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap.Combinators
+open Ostap
        
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -38,25 +41,67 @@ module Expr =
     let update x v s = fun y -> if x = y then v else s y
 
     (* Expression evaluator
-
           val eval : state -> t -> int
  
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
      *)                                                       
-    let eval _ _ = failwith "Not yet implemented"
+    let rec eval curState expr =
+
+      let applyOp op =
+        let (&) f g x y   = f (g x y) in
+        let boolToInt   b = if b then 1 else 0 in
+        let boolFromInt i = if abs i > 0 then true else false in
+        let boolF f x y   = f (boolFromInt x) (boolFromInt y) in
+
+        match op with
+          | "+"  -> (  +  )
+          | "-"  -> (  -  )
+          | "*"  -> (  *  )
+          | "/"  -> (  /  )
+          | "%"  -> ( mod )
+          | "<"  -> boolToInt & ( < )
+          | "<=" -> boolToInt & ( <= )
+          | ">"  -> boolToInt & ( >  )
+          | ">=" -> boolToInt & ( >= )
+          | "==" -> boolToInt & ( == )
+          | "!=" -> boolToInt & ( != )
+          | "&&" -> boolToInt & boolF ( && )
+          | "!!" -> boolToInt & boolF ( || )
+          | _    -> failwith "Unknown operation" in
+
+      match expr with
+        | Const i                 -> i
+        | Var   v                 -> curState v
+        | Binop (op, left, right) -> applyOp op (eval curState left) (eval curState right)
+
+      end
 
     (* Expression parser. You can use the following terminals:
-
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
          DECIMAL --- a decimal constant [0-9]+ as a string
                                                                                                                   
     *)
-    ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+    let parseBinop op = ostap(- $(op)), (fun x y -> Expr.Binop (op, x, y))
+    ostap (
+      expr:
+        !(Util.expr
+           (fun x -> x)
+           (Array.map (fun (a, ops) -> a, List.map parseBinop ops)
+                [|
+                  `Lefta, ["!!"];
+                  `Lefta, ["&&"];
+                  `Nona , ["=="; "!="; "<="; ">="; "<"; ">"];
+                  `Lefta, ["+"; "-"];
+                  `Lefta, ["*"; "/"; "%"];
+                |]
+           )
+           primary
+         );
+
+      primary: x:IDENT { Expr.Var x } | n:DECIMAL { Expr.Const n } | -"(" expr -")"
     )
-    
-  end
+
                     
 (* Simple statements: syntax and sematics *)
 module Stmt =
@@ -73,16 +118,27 @@ module Stmt =
     type config = Expr.state * int list * int list 
 
     (* Statement evaluator
-
          val eval : config -> t -> config
-
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ _ = failwith "Not yet implemented"
+    let rec eval (curState, i, o) t =
+      match t with
+        | Read    var           -> (Expr.update var (hd i) curState, tl i, o)
+        | Write   expr          -> let res = Expr.eval curState expr
+                                   in (curState, i, o @ [res])
+        | Assign (var, expr)    -> let res = Expr.eval curState expr
+                                   in (Expr.update var res curState, i, o)
+        | Seq    (expr1, expr2) -> let first = eval (curState, i, o) expr1
+                                   in eval first expr2
 
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not yet implemented"}
+      simpleStmt:
+        x:IDENT ":=" e:expr     { Assign (x, e) }
+      | "read"  "(" x:IDENT ")" { Read   x      }
+      | "write" "(" e:expr  ")" { Write  e      };
+
+      parse: s1:simpleStmt ";" s2:parse { Seq (s1, s2) } | simpleStmt
     )
       
   end
@@ -93,13 +149,11 @@ module Stmt =
 type t = Stmt.t    
 
 (* Top-level evaluator
-
      eval : t -> int list -> int list
-
    Takes a program and its input stream, and returns the output stream
 *)
 let eval p i =
   let _, _, o = Stmt.eval (Expr.empty, i, []) p in o
 
 (* Top-level parser *)
-let parse = Stmt.parse                                                     
+let parse = Stmt.parse

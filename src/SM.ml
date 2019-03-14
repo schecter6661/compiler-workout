@@ -1,6 +1,8 @@
 open GT       
 open Language
-       
+
+open List
+
 (* The type for the stack machine instructions *)
 @type insn =
 (* binary operator                 *) | BINOP of string
@@ -19,25 +21,41 @@ type prg = insn list
 type config = int list * Stmt.config
 
 (* Stack machine interpreter
-
      val eval : config -> prg -> config
-
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let rec eval (st, conf) p =
+    match p with
+      | []            -> (st, conf)
+      | READ     :: p -> let (curState, e::i, o) = conf in
+                         let newState            = (e :: st, (curState, i, o))
+                         in eval newState p
+      | WRITE    :: p -> let afterWrite   = Language.Stmt.eval conf (Write (Const (hd st))) in
+                         let newState     = (tl st, afterWrite)
+                         in eval newState p
+      | CONST x  :: p -> let newState = (x :: st, conf)
+                         in eval newState p
+      | LD v     :: p -> let (curState, _, _) = conf in
+                         let newState         = (curState v :: st, conf)
+                         in eval newState p
+      | ST v     :: p -> let afterAssign = Language.Stmt.eval conf (Assign (v, Const (hd st))) in
+                         let newState    = (tl st, afterAssign)
+                         in eval newState p
+      | BINOP op :: p -> let (curState, _, _) = conf in
+                         let (y :: x :: con)  = st in
+                         let opRes            = Expr.eval curState (Binop (op, Const x, Const y)) in
+                         let newState         = (opRes :: con, conf)
+                         in eval newState p
+      | _             -> failwith "Unknown instruction"
 
 (* Top-level evaluation
-
      val run : prg -> int list -> int list
-
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
 let run p i = let (_, (_, _, o)) = eval ([], (Expr.empty, i, [])) p in o
 
 (* Stack machine compiler
-
      val compile : Language.Stmt.t -> prg
-
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
