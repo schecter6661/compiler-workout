@@ -1,8 +1,6 @@
 open GT       
 open Language
-
-open List
-
+       
 (* The type for the stack machine instructions *)
 @type insn =
 (* binary operator                 *) | BINOP of string
@@ -24,30 +22,22 @@ type config = int list * Stmt.config
      val eval : config -> prg -> config
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval (st, conf) p =
-    match p with
-      | []            -> (st, conf)
-      | READ     :: p -> let (curState, e::i, o) = conf in
-                         let newState            = (e :: st, (curState, i, o))
-                         in eval newState p
-      | WRITE    :: p -> let afterWrite   = Language.Stmt.eval conf (Write (Const (hd st))) in
-                         let newState     = (tl st, afterWrite)
-                         in eval newState p
-      | CONST x  :: p -> let newState = (x :: st, conf)
-                         in eval newState p
-      | LD v     :: p -> let (curState, _, _) = conf in
-                         let newState         = (curState v :: st, conf)
-                         in eval newState p
-      | ST v     :: p -> let afterAssign = Language.Stmt.eval conf (Assign (v, Const (hd st))) in
-                         let newState    = (tl st, afterAssign)
-                         in eval newState p
-      | BINOP op :: p -> let (curState, _, _) = conf in
-                         let (y :: x :: con)  = st in
-                         let opRes            = Expr.eval curState (Binop (op, Const x, Const y)) in
-                         let newState         = (opRes :: con, conf)
-                         in eval newState p
-      | _             -> failwith "Unknown instruction"
+let eval_insn config insn = 
+	let (stack, stmt_config) = config in
+	let (state, input, output) = stmt_config in
+	match insn with
+	| BINOP operator -> (match stack with
+		| y::x::tail -> ([(Language.Expr.get_operator operator) x y]@tail, stmt_config))
+	| CONST value -> ([value]@stack, stmt_config)                 
+	| READ -> (match input with
+		| head::tail -> ([head]@stack, (state, tail, output)))
+	| WRITE -> (match stack with
+		| head::tail -> (tail, (state, input, output@[head])))
+	| LD  variable_name -> ([state variable_name]@stack, stmt_config)
+	| ST  variable_name -> (match stack with
+		| head::tail -> (tail, (Language.Expr.update variable_name head state, input, output)))
 
+		let eval config prg = List.fold_left eval_insn config prg
 (* Top-level evaluation
      val run : prg -> int list -> int list
    Takes a program, an input stream, and returns an output stream this program calculates
